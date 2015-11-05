@@ -1,0 +1,10 @@
+[package]
+name = "gitrust"
+version = "0.1.0"
+authors = ["Daniel Wagner-Hall <dawagner@gmail.com>"]
+
+[dependencies]
+getopts = "0.2"
+hyper = "0.6.15"
+rustc-serialize = "0.3"
+tempdir = "0.3.4"
