@@ -60,12 +60,13 @@ fn merge_with_squash(path: &Path, branch: &str) -> Result<(), Box<Error + Send +
 
 fn commit(path: &Path, message: &str) -> Result<String, Box<Error + Send + Sync>> {
     let output = try!(run_git_command(path, &["commit", "-m", message]));
+    // [branch sha1] commit message
     let mut parts = output.split(" ");
     let part = match parts.nth(1) {
-        Some(p) => p,
+        Some(p) => { let mut s = p.to_owned(); s.pop() ; s },
         None => { return Err(From::from(format!("could not find sha in {}", output))) },
     };
-    return Ok(part.to_owned());
+    return Ok(part);
 }
 
 fn push(path: &Path, remote: &str, branch: &str, username: &str, password: &str) -> Result<(), Box<Error + Send + Sync>> {
