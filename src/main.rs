@@ -6,6 +6,7 @@ extern crate rustc_serialize;
 extern crate tempdir;
 
 use getopts::Options;
+use hyper::net::Openssl;
 use hyper::server::{Server, Request, Response};
 use hyper::status::StatusCode;
 use hyper::uri::RequestUri::AbsolutePath;
@@ -16,15 +17,22 @@ use std::io::Read;
 use std::string::String;
 
 fn main() {
-    let listen_address = get_listen_address();
+    let (listen_address, ssl) = get_listen_address();
     println!("Listening on {}", listen_address);
-    Server::http(&listen_address[..]).unwrap().handle(handle).unwrap();
+    if ssl.is_some() {
+        Server::https(&listen_address[..], ssl.unwrap()).unwrap().handle(handle).unwrap();
+    } else {
+        Server::http(&listen_address[..]).unwrap().handle(handle).unwrap();
+    }
 }
 
-fn get_listen_address() -> String {
+fn get_listen_address() -> (String, Option<Openssl>) {
     let mut opts = Options::new();
     opts.optopt("p", "port", "Port on which to listen", "3000");
     opts.optopt("i", "interface", "Interface on which to listen", "0.0.0.0");
+    opts.optflag("s", "ssl", "Whether to listen for HTTPS or just HTTP");
+    opts.optopt("c", "certfile", "SSL certificate file", "/path/to/foo.crt");
+    opts.optopt("k", "keyfile", "SSL key file", "/path/to/foo.key");
     let args: Vec<String> = env::args().collect();
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -32,7 +40,13 @@ fn get_listen_address() -> String {
     };
     let interface = matches.opt_str("i").unwrap_or("0.0.0.0".to_owned());
     let port = matches.opt_str("p").unwrap_or("3000".to_owned());
-    return format!("{}:{}", interface, port);
+
+    let mut ssl = None;
+    if matches.opt_present("s") {
+        ssl = Some(Openssl::with_cert_and_key(matches.opt_str("c").unwrap(), matches.opt_str("k").unwrap()).unwrap());
+    }
+
+    return (format!("{}:{}", interface, port), ssl);
 }
 
 fn handle(req: Request, mut res: Response) {
