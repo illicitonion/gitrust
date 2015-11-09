@@ -4,8 +4,10 @@ extern crate getopts;
 extern crate hyper;
 extern crate rustc_serialize;
 extern crate tempdir;
+extern crate unicase;
 
 use getopts::Options;
+use hyper::header;
 use hyper::net::Openssl;
 use hyper::server::{Server, Request, Response};
 use hyper::status::StatusCode;
@@ -15,6 +17,7 @@ use std::env;
 use std::error::Error;
 use std::io::Read;
 use std::string::String;
+use unicase::UniCase;
 
 fn main() {
     let (listen_address, ssl) = get_listen_address();
@@ -54,43 +57,58 @@ fn handle(req: Request, mut res: Response) {
         AbsolutePath(ref p) => p.clone(),
         _ => { let _ = *res.status_mut() = StatusCode::NotFound ; return },
     };
-    if path.starts_with("/squashmerge") {
-        match req.method {
-            hyper::Post => { handle_squash_request(req, res) ; return },
-            _ => { let _ = *res.status_mut() = StatusCode::MethodNotAllowed ; return },
-        }
-    }
-    *res.status_mut() = StatusCode::NotFound;
-}
 
-fn handle_squash_request(mut req: Request, mut res: Response) {
-    let mut body = String::new();
+    res.headers_mut().set(header::AccessControlAllowOrigin::Any);
+    res.headers_mut().set(header::AccessControlAllowHeaders(vec![UniCase("content-type".to_owned())]));
 
-    if !req.read_to_string(&mut body).is_ok() {
-        let _ = *res.status_mut() = StatusCode::BadRequest;
+    if req.method == hyper::method::Method::Options {
         return
     }
 
-    let (base_repo, base_branch, head_repo, head_branch, commit_message, username, password) = match parse_body( &body) {
-        Ok((base_repo, base_branch, head_repo, head_branch, commit_message, username, password)) => (base_repo, base_branch, head_repo, head_branch, commit_message, username, password),
-        Err(err) => { 
-            let message = json::encode(&err.description()).unwrap_or("\"error\"".to_owned());
-            let _ = res.send(format!("{{\"message\": {}}}", message).as_bytes());
-            return;
+    match &path[..] {
+        "/squashmerge" => {
+            match req.method {
+                hyper::Post => { handle_request(req, res, handle_squash_request) ; return },
+                _ => { let _ = *res.status_mut() = StatusCode::MethodNotAllowed ; return },
+            }
         },
+        "/rewritehistory" => {
+            match req.method {
+                hyper::Post => { handle_request(req, res, handle_rewrite_history_request) ; return },
+                _ => { let _ = *res.status_mut() = StatusCode::MethodNotAllowed ; return },
+            }
+        },
+        _ => { let _ = *res.status_mut() = StatusCode::NotFound; }
     };
+}
 
-    let merged = git::squash_merge(
-        &base_repo,
-        &base_branch,
-        &head_repo,
-        &head_branch,
-        &commit_message,
-        &username,
-        &password
-    );
+macro_rules! get_json_string {
+    ( $obj:expr, $key:expr ) => {
+        {
+            let val = match $obj.find($key) {
+                Some(v) => v,
+                None => return Err(From::from(format!("missing {}", $key))),
+            };
+            let s = match val.as_string() {
+                Some(v) => v,
+                None => return Err(From::from(format!("not a string: {}", $key))),
+            };
+            s
+        }
+    }
+}
 
-    let (code, resp) = match merged {
+fn handle_request<F>(mut req: Request, mut res: Response, handler: F)
+    where F : Fn(&str) -> Result<String, Box<Error + Send + Sync>> {
+
+    let mut body_string = String::new();
+    if !req.read_to_string(&mut body_string).is_ok() {
+        let _ = *res.status_mut() = StatusCode::InternalServerError;
+        let _ = res.send("\"message\": \"error reading body\"}".as_bytes());
+        return
+    }
+
+    let (code, resp) = match handler(&body_string) {
         Ok(sha) => json::encode(&ShaResponse { sha: &sha, merged: true }).ok().map_or(
             (StatusCode::InternalServerError, "{\"message\": \"error serializing response\"}".to_owned()),
             |r| (StatusCode::Ok, r)
@@ -105,45 +123,32 @@ fn handle_squash_request(mut req: Request, mut res: Response) {
     let _ = res.send(resp.as_bytes());
 }
 
-fn parse_body(body_string: &String) -> Result<(String, String, String, String, String, String, String), Box<Error + Send + Sync>> {
+fn handle_squash_request(body_string: &str) -> Result<String, Box<Error + Send + Sync>> {
     let body = try!(Json::from_str(body_string));
-    let base_repo = match get_string(&body, "base_repo") {
-        Some(v) => v,
-        None => return Err(From::from("missing base_repo")),
-    };
-    let base_branch = match get_string(&body, "base_branch") {
-        Some(v) => v,
-        None => return Err(From::from("missing base_branch")),
-    };
-    let head_repo = match get_string(&body, "head_repo") {
-        Some(v) => v,
-        None => return Err(From::from("missing head_repo")),
-    };
-    let head_branch = match get_string(&body, "head_branch") {
-        Some(v) => v,
-        None => return Err(From::from("missing head_branch")),
-    };
-    let commit_message = match get_string(&body, "commit_message") {
-        Some(v) => v,
-        None => return Err(From::from("missing commit_message")),
-    };
-    let username = match get_string(&body, "username") {
-        Some(v) => v,
-        None => return Err(From::from("missing username")),
-    };
-    let password = match get_string(&body, "password") {
-        Some(v) => v,
-        None => return Err(From::from("missing password")),
-    };
-    return Ok((base_repo, base_branch, head_repo, head_branch, commit_message, username, password));
+
+    return git::squash_merge(
+        get_json_string!(body, "base_repo"),
+        get_json_string!(body, "base_branch"),
+        get_json_string!(body, "head_repo"),
+        get_json_string!(body, "head_branch"),
+        get_json_string!(body, "commit_message"),
+        get_json_string!(body, "username"),
+        get_json_string!(body, "password"),
+    );
 }
 
-fn get_string(obj: &Json, key: &str) -> Option<String> {
-    let s = match obj.find(key) {
-        Some(v) => v,
-        None => return None,
-    };
-    return s.as_string().map_or(None, |s| Some(s.to_owned()))
+fn handle_rewrite_history_request(body_string: &str) -> Result<String, Box<Error + Send + Sync>> {
+    let body = try!(Json::from_str(body_string));
+
+    return git::rewrite_history(
+        get_json_string!(body, "repo"),
+        get_json_string!(body, "branch"),
+        get_json_string!(body, "baseline_repo"),
+        get_json_string!(body, "baseline_branch"),
+        get_json_string!(body, "commit_message"),
+        get_json_string!(body, "username"),
+        get_json_string!(body, "password")
+    );
 }
 
 #[derive(RustcEncodable)]
