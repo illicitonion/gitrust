@@ -6,10 +6,14 @@ authors = ["Daniel Wagner-Hall <dawagner@gmail.com>"]
 [dependencies]
 getopts = "0.2"
 hyper = "0.6.15"
+oauth2 = "0.1.9"
 rustc-serialize = "0.3"
 tempdir = "0.3.4"
 unicase = "1.0.1"
 uuid = "0.1.18"
+
+[dependencies.queryst]
+git = "https://github.com/rustless/queryst"
 
 [dependencies.url]
 git = "https://github.com/servo/rust-url"
