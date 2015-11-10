@@ -33,6 +33,9 @@ pub fn rewrite_history(repo: &str, branch: &str, baseline_repo: &str, baseline_b
 
     let branch_to_diff = try!(fetch_remote(repodir_path, repo, baseline_repo, baseline_branch));
 
+    try!(checkout(tmpdir.path(), branch));
+    try!(merge(tmpdir.path(), &branch_to_diff));
+    try!(checkout(tmpdir.path(), &branch_to_diff));
 
     let new_branch = Uuid::new_v4().to_hyphenated_string();
     try!(create_branch(repodir_path, &new_branch));
@@ -86,6 +89,11 @@ fn clone(path: &Path, repo: &str) -> Result<(), Box<Error + Send + Sync>> {
 
 fn checkout(path: &Path, branch: &str) -> Result<(), Box<Error + Send + Sync>> {
     try!(run_git_command(path, &["checkout", branch]));
+    return Ok(());
+}
+
+fn merge(path: &Path, branch: &str) -> Result<(), Box<Error + Send + Sync>> {
+    try!(run_git_command(path, &["merge", branch]));
     return Ok(());
 }
 
