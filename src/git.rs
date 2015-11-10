@@ -14,17 +14,7 @@ pub fn squash_merge(base_repo: &str, base_branch: &str, head_repo: &str, head_br
     let tmpdir = try!(TempDir::new("_gitclone"));
 
     try!(clone(tmpdir.path(), base_repo));
-
-    let mut branch_to_merge = String::new();
-    if base_repo != head_repo {
-        try!(add_remote(tmpdir.path(), "tomerge", head_repo));
-        try!(fetch(tmpdir.path(), Some("tomerge")));
-
-        branch_to_merge.push_str("tomerge/");
-    } else {
-        branch_to_merge.push_str("origin/");
-    }
-    branch_to_merge.push_str(head_branch);
+    let branch_to_merge = try!(fetch_remote(tmpdir.path(), base_repo, head_repo, head_branch));
 
     try!(checkout(tmpdir.path(), base_branch));
     try!(merge_with_squash(tmpdir.path(), &branch_to_merge));
@@ -41,16 +31,8 @@ pub fn rewrite_history(repo: &str, branch: &str, baseline_repo: &str, baseline_b
 
     try!(clone(repodir_path, repo));
 
-    let mut branch_to_diff = String::new();
-    if baseline_repo != repo {
-        try!(add_remote(tmpdir.path(), "todiff", baseline_repo));
-        try!(fetch(tmpdir.path(), Some("todiff")));
+    let branch_to_diff = try!(fetch_remote(repodir_path, repo, baseline_repo, baseline_branch));
 
-        branch_to_diff.push_str("todiff/");
-    } else {
-        branch_to_diff.push_str("origin/");
-    }
-    branch_to_diff.push_str(baseline_branch);
 
     let new_branch = Uuid::new_v4().to_hyphenated_string();
     try!(create_branch(repodir_path, &new_branch));
@@ -81,6 +63,20 @@ fn fetch(path: &Path, remote_name: Option<&str>) -> Result<(), Box<Error + Send 
     }
     try!(run_git_command(path, &args[..]));
     return Ok(());
+}
+
+fn fetch_remote(path: &Path, cloned_repo: &str, remote_repo: &str, remote_branch: &str) -> Result<String, Box<Error + Send + Sync>> {
+    let mut target = String::new();
+    if cloned_repo != remote_repo {
+        try!(add_remote(path, "remote", remote_repo));
+        try!(fetch(path, Some("remote")));
+
+        target.push_str("remote/");
+    } else {
+        target.push_str("origin/");
+    }
+    target.push_str(remote_branch);
+    return Ok(target);
 }
 
 fn clone(path: &Path, repo: &str) -> Result<(), Box<Error + Send + Sync>> {
