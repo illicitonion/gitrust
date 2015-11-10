@@ -10,3 +10,6 @@ rustc-serialize = "0.3"
 tempdir = "0.3.4"
 unicase = "1.0.1"
 uuid = "0.1.18"
+
+[dependencies.url]
+git = "https://github.com/servo/rust-url"
