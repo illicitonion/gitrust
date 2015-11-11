@@ -1,8 +1,6 @@
 extern crate uuid;
 
 use std::error::Error;
-use std::fs::{self, File};
-use std::os::unix::prelude::{AsRawFd, FromRawFd};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::str::from_utf8;
@@ -26,30 +24,18 @@ pub fn squash_merge(base_repo: &str, base_branch: &str, head_repo: &str, head_br
 
 pub fn rewrite_history(repo: &str, branch: &str, baseline_repo: &str, baseline_branch: &str, commit_message: &str, username: &str, password: &str) -> Result<String, String> {
     let tmpdir = try_or_string!(TempDir::new("_gitclone"));
-    let repodir = tmpdir.path().join("repo");
-    let repodir_path = repodir.as_path();
-    try_or_string!(fs::create_dir(repodir_path));
 
-    try!(clone(repodir_path, repo));
+    try!(clone(tmpdir.path(), repo));
 
-    let branch_to_diff = try!(fetch_remote(repodir_path, repo, baseline_repo, baseline_branch));
+    let branch_to_diff = try!(fetch_remote(tmpdir.path(), repo, baseline_repo, baseline_branch));
 
-    try!(checkout(repodir_path, branch));
-    try!(merge(repodir_path, &branch_to_diff));
-    try!(checkout(repodir_path, &branch_to_diff));
+    try!(checkout(tmpdir.path(), &branch_to_diff));
 
     let new_branch = Uuid::new_v4().to_hyphenated_string();
-    try!(create_branch(repodir_path, &new_branch));
-    // It would be nice to use tempfile here, but it has a dep clash with time
-    let tmpfile = tmpdir.path().join(&new_branch);
-    unsafe {
-        try!(diff(repodir_path, &branch_to_diff, &format!("origin/{}", branch), Stdio::from_raw_fd(try_or_string!(File::create(tmpfile.as_path())).as_raw_fd())));
-        try!(apply(repodir_path, Stdio::from_raw_fd(try_or_string!(File::open(tmpfile.as_path())).as_raw_fd())));
-    }
-    try!(add_all(repodir_path));
-
-    let sha = try!(commit(repodir_path, commit_message));
-    try!(push(repodir_path, "origin", &format!("{}:{}", new_branch, branch), username, password, true));
+    try!(create_branch(tmpdir.path(), &new_branch));
+    try!(merge_with_squash(tmpdir.path(), branch));
+    let sha = try!(commit(tmpdir.path(), commit_message));
+    try!(push(tmpdir.path(), "origin", &format!("{}:{}", new_branch, branch), username, password, true));
 
     return Ok(sha);
 }
@@ -93,11 +79,6 @@ fn checkout(path: &Path, branch: &str) -> Result<(), String> {
     return Ok(());
 }
 
-fn merge(path: &Path, branch: &str) -> Result<(), String> {
-    try!(run_git_command(path, &["merge", branch]));
-    return Ok(());
-}
-
 fn create_branch(path: &Path, new_branch: &str) -> Result<(), String> {
     try!(run_git_command(path, &["checkout", "-b", new_branch]));
     return Ok(());
@@ -105,11 +86,6 @@ fn create_branch(path: &Path, new_branch: &str) -> Result<(), String> {
 
 fn merge_with_squash(path: &Path, branch: &str) -> Result<(), String> {
     try!(run_git_command(path, &["merge", "--squash", branch]));
-    return Ok(());
-}
-
-fn add_all(path: &Path) -> Result<(), String> {
-    try!(run_git_command(path, &["add", "-A"]));
     return Ok(());
 }
 
@@ -126,16 +102,6 @@ fn commit(path: &Path, message: &str) -> Result<String, String> {
 
 fn expand_sha(path: &Path, sha: &str) -> Result<String, String> {
     return Ok(try!(run_git_command(path, &["log", "-n1", sha, "--pretty=format:%H"])));
-}
-
-fn diff(path: &Path, base: &str, head: &str, out_to: Stdio) -> Result<(), String> {
-    try!(run_git_command_with_fn(path, &["diff", base, head], |c| c.stdout(out_to)));
-    return Ok(());
-}
-
-fn apply(path: &Path, in_from: Stdio) -> Result<(), String> {
-    try!(run_git_command_with_fn(path, &["apply", "-"], |c| c.stdin(in_from)));
-    return Ok(());
 }
 
 fn push(path: &Path, remote: &str, branch: &str, username: &str, password: &str, force: bool) -> Result<(), String> {
