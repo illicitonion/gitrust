@@ -33,7 +33,7 @@ pub fn rewrite_history(repo: &str, branch: &str, baseline_repo: &str, baseline_b
 
     let new_branch = Uuid::new_v4().to_hyphenated_string();
     try!(create_branch(tmpdir.path(), &new_branch));
-    try!(merge_with_squash(tmpdir.path(), branch));
+    try!(merge_with_squash(tmpdir.path(), &format!("origin/{}", branch)));
     let sha = try!(commit(tmpdir.path(), commit_message));
     try!(push(tmpdir.path(), "origin", &format!("{}:{}", new_branch, branch), username, password, true));
 
