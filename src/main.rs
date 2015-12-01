@@ -196,12 +196,14 @@ impl Handler {
             uris.insert(uuid.clone(), redirect_uri.unwrap().to_owned());
         }
 
+        // TODO: Implement clone for oauth2::Config
         let mut oauth_config = oauth2::Config::new(
             &self.oauth_config.client_id,
             &self.oauth_config.client_secret,
             &self.oauth_config.auth_url.to_string(),
             &self.oauth_config.token_url.to_string(),
         );
+        oauth_config.redirect_url = self.oauth_config.redirect_url.clone();
         oauth_config.scopes.extend(self.get_scopes(&qs));
 
         let _ = *res.status_mut() = StatusCode::Found;
