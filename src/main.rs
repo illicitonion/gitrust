@@ -81,7 +81,6 @@ fn parse_flags() -> (String, Option<Openssl>, oauth2::Config, String) {
         "https://github.com/login/oauth/authorize",
         "https://github.com/login/oauth/access_token"
     );
-    oauth_config.scopes.push("repo".to_owned());
     let oauth_redirect_path = matches.opt_str("oauth_redirect_path").unwrap();
     oauth_config.redirect_url = format!("https://{}{}", matches.opt_str("host_and_port").unwrap(), oauth_redirect_path);
 
@@ -190,15 +189,23 @@ impl Handler {
     fn handle_oauth_authorize_request(&self, qs: Option<String>, mut res: Response) {
         let uuid = Uuid::new_v4().to_hyphenated_string();
 
-        let redirect_uri = self.get_redirect_uri(qs);
+        let redirect_uri = self.get_redirect_uri(&qs);
 
         if redirect_uri.is_some() {
             let mut uris = self.redirect_uris.lock().unwrap();
             uris.insert(uuid.clone(), redirect_uri.unwrap().to_owned());
         }
 
+        let mut oauth_config = oauth2::Config::new(
+            &self.oauth_config.client_id,
+            &self.oauth_config.client_secret,
+            &self.oauth_config.auth_url.to_string(),
+            &self.oauth_config.token_url.to_string(),
+        );
+        oauth_config.scopes.extend(self.get_scopes(&qs));
+
         let _ = *res.status_mut() = StatusCode::Found;
-        res.headers_mut().set(header::Location(self.oauth_config.authorize_url(uuid).to_string()));
+        res.headers_mut().set(header::Location(oauth_config.authorize_url(uuid).to_string()));
     }
 
     fn handle_oauth_exchange_request(&self, qs: &str, res: Response) {
@@ -249,15 +256,29 @@ impl Handler {
         };
     }
 
-    fn get_redirect_uri(&self, qs: Option<String>) -> Option<String> {
-        let kv = match qs {
+    fn get_redirect_uri(&self, qs: &Option<String>) -> Option<String> {
+        return self.get_string_qs(qs, "redirect_uri");
+    }
+
+    fn get_scopes(&self, qs: &Option<String>) -> Vec<String> {
+        let val = self.get_string_qs(qs, "scopes")
+            .clone()
+            .unwrap_or("".to_owned());
+        return val
+            .split(",")
+            .map(|x| x.to_string())
+            .collect();
+    }
+
+    fn get_string_qs(&self, qs: &Option<String>, key: &str) -> Option<String> {
+        let kv = match qs.clone() {
             Some(q) => match parse(&q) {
                 Ok(kv) => kv,
                 Err(_) => return None,
             },
             None => return None,
         };
-        return kv.find("redirect_uri")
+        return kv.find(key)
             .and_then(|v| v.as_string())
             .and_then(|v| Some(v.to_owned().clone()));
     }
