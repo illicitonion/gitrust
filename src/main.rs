@@ -23,10 +23,12 @@ use oauth2::Config;
 use rustc_serialize::Encodable;
 use rustc_serialize::json::{self, Json};
 use queryst::parse;
+use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 use std::io::Read;
 use std::string::String;
+use std::sync::{Arc, Mutex};
 use unicase::UniCase;
 use url::parse_path;
 use self::uuid::Uuid;
@@ -34,7 +36,11 @@ use self::uuid::Uuid;
 fn main() {
     let (listen_address, ssl, oauth_config, oauth_redirect_path) = parse_flags();
 
-    let handler = Handler{ oauth_config: oauth_config, oauth_redirect_path: oauth_redirect_path, };
+    let handler = Handler{
+        oauth_config: oauth_config,
+        oauth_redirect_path: oauth_redirect_path,
+        redirect_uris: Arc::new(Mutex::new(HashMap::new())),
+    };
 
     println!("Listening on {}", listen_address);
     if ssl.is_some() {
@@ -86,6 +92,7 @@ fn parse_flags() -> (String, Option<Openssl>, oauth2::Config, String) {
 struct Handler {
     oauth_config: oauth2::Config,
     oauth_redirect_path: String,
+    redirect_uris: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl hyper::server::Handler for Handler {
@@ -115,7 +122,7 @@ impl hyper::server::Handler for Handler {
                 _ => self.not_allowed(res),
             },
             "/oauth/authorize" => match req.method {
-                hyper::Get => self.handle_oauth_authorize_request(res),
+                hyper::Get => self.handle_oauth_authorize_request(qs, res),
                 _ => self.not_allowed(res),
             },
             _ => {
@@ -180,9 +187,18 @@ impl Handler {
         );
     }
 
-    fn handle_oauth_authorize_request(&self, mut res: Response) {
+    fn handle_oauth_authorize_request(&self, qs: Option<String>, mut res: Response) {
+        let uuid = Uuid::new_v4().to_hyphenated_string();
+
+        let redirect_uri = self.get_redirect_uri(qs);
+
+        if redirect_uri.is_some() {
+            let mut uris = self.redirect_uris.lock().unwrap();
+            uris.insert(uuid.clone(), redirect_uri.unwrap().to_owned());
+        }
+
         let _ = *res.status_mut() = StatusCode::Found;
-        res.headers_mut().set(header::Location(self.oauth_config.authorize_url(Uuid::new_v4().to_hyphenated_string()).to_string()));
+        res.headers_mut().set(header::Location(self.oauth_config.authorize_url(uuid).to_string()));
     }
 
     fn handle_oauth_exchange_request(&self, qs: &str, res: Response) {
@@ -197,10 +213,29 @@ impl Handler {
             },
             None => { self.error(res, "No code present"); return },
         };
+        let state = match obj.find("state") {
+            Some(c) => match c.as_string() {
+                Some(c) => c,
+                None => { self.error(res, "state not a string"); return },
+            },
+            None => { self.error(res, "No state present"); return },
+        };
         let token = self.oauth_config.exchange(code.to_owned());
         match token {
-            Ok(tok) => self.send_json(res, &TokenResponse { access_token: &tok.access_token }),
+            Ok(tok) => self.respond_with_token(res, state, &tok.access_token),
             Err(tok) => self.error(res, &format!("Error exchanging token: {}", tok)),
+        };
+    }
+
+    fn respond_with_token(&self, mut res: Response, uuid: &str, token: &str) {
+        let mut uris = self.redirect_uris.lock().unwrap();
+        match uris.remove(uuid) {
+            Some(uri) => {
+                let _ = *res.status_mut() = StatusCode::Found;
+                // TODO: Form URI better
+                res.headers_mut().set(header::Location(format!("{}?token={}", uri, token)));
+            },
+            None => { self.send_json(res, &TokenResponse { access_token: &token }); }
         };
     }
 
@@ -212,6 +247,19 @@ impl Handler {
                 let _ = res.send("{\"message\": \"error serializing response\"}".as_bytes());
             },
         };
+    }
+
+    fn get_redirect_uri(&self, qs: Option<String>) -> Option<String> {
+        let kv = match qs {
+            Some(q) => match parse(&q) {
+                Ok(kv) => kv,
+                Err(_) => return None,
+            },
+            None => return None,
+        };
+        return kv.find("redirect_uri")
+            .and_then(|v| v.as_string())
+            .and_then(|v| Some(v.to_owned().clone()));
     }
 
     fn error(&self, mut res: Response, description: &str) {
