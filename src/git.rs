@@ -8,7 +8,7 @@ use std::string::String;
 use tempdir::TempDir;
 use self::uuid::Uuid;
 
-pub fn squash_merge(base_repo: &str, base_branch: &str, head_repo: &str, head_branch: &str, commit_message: &str, username: &str, password: &str) -> Result<String, String> {
+pub fn squash_merge(base_repo: &str, base_branch: &str, head_repo: &str, head_branch: &str, commit_message: &str, username: &str, password: &str, committer_name: &str, committer_email: &str) -> Result<String, String> {
     let tmpdir = try_or_string!(TempDir::new("_gitclone"));
 
     try!(clone(tmpdir.path(), base_repo));
@@ -16,13 +16,13 @@ pub fn squash_merge(base_repo: &str, base_branch: &str, head_repo: &str, head_br
 
     try!(checkout(tmpdir.path(), base_branch));
     try!(merge_with_squash(tmpdir.path(), &branch_to_merge));
-    let sha = try!(commit(tmpdir.path(), commit_message));
+    let sha = try!(commit(tmpdir.path(), commit_message, committer_name, committer_email));
     try!(push(tmpdir.path(), "origin", base_branch, username, password, false));
 
     return Ok(sha);
 }
 
-pub fn rewrite_history(repo: &str, branch: &str, baseline_repo: &str, baseline_branch: &str, commit_message: &str, username: &str, password: &str) -> Result<String, String> {
+pub fn rewrite_history(repo: &str, branch: &str, baseline_repo: &str, baseline_branch: &str, commit_message: &str, username: &str, password: &str, committer_name: &str, committer_email: &str) -> Result<String, String> {
     let tmpdir = try_or_string!(TempDir::new("_gitclone"));
 
     try!(clone(tmpdir.path(), repo));
@@ -34,7 +34,7 @@ pub fn rewrite_history(repo: &str, branch: &str, baseline_repo: &str, baseline_b
     let new_branch = Uuid::new_v4().to_hyphenated_string();
     try!(create_branch(tmpdir.path(), &new_branch));
     try!(merge_with_squash(tmpdir.path(), &format!("origin/{}", branch)));
-    let sha = try!(commit(tmpdir.path(), commit_message));
+    let sha = try!(commit(tmpdir.path(), commit_message, committer_name, committer_email));
     try!(push(tmpdir.path(), "origin", &format!("{}:{}", new_branch, branch), username, password, true));
 
     return Ok(sha);
@@ -89,8 +89,9 @@ fn merge_with_squash(path: &Path, branch: &str) -> Result<(), String> {
     return Ok(());
 }
 
-fn commit(path: &Path, message: &str) -> Result<String, String> {
-    let output = try!(run_git_command(path, &["commit", "-m", message]));
+fn commit(path: &Path, message: &str, name: &str, email: &str) -> Result<String, String> {
+    let author = format!("{} <{}>", name, email);
+    let output = try!(run_git_command(path, &["commit", "-m", message, "--author", &author]));
     // [branch sha1] commit message
     let mut parts = output.split(" ");
     let part = match parts.nth(1) {
