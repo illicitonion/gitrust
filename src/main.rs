@@ -138,7 +138,7 @@ impl hyper::server::Handler for Handler {
                     match req.method {
                         hyper::Get => match qs {
                             Some(q) => self.handle_oauth_exchange_request(&q, res),
-                            None => self.bad_request(res),
+                            None => self.bad_request(res, "Missing querstring"),
                         },
                         _ => self.not_allowed(res),
                     }
@@ -205,7 +205,7 @@ impl Handler {
         let redirect_uri = self.get_redirect_uri(&qs);
 
         if redirect_uri.is_none() {
-            self.bad_request(res);
+            self.bad_request(res, "Missing redirect_uri");
             return;
         }
 
@@ -260,7 +260,7 @@ impl Handler {
                 // TODO: Form URI better
                 res.headers_mut().set(header::Location(format!("{}?token={}", uri, token)));
             },
-            None => { self.bad_request(res); },
+            None => { self.bad_request(res, "Unknown caller"); },
         };
     }
 
@@ -294,7 +294,7 @@ impl Handler {
                     return None;
                 }
             },
-            Err(_) => {return None; },
+            Err(_) => { return None; },
         };
         return string;
     }
@@ -331,9 +331,9 @@ impl Handler {
         self.send_json(res, &ErrorResponse { message: description });
     }
 
-    fn bad_request(&self, mut res: Response) {
+    fn bad_request(&self, mut res: Response, reason: &str) {
         let _ = *res.status_mut() = StatusCode::BadRequest;
-        self.send_json(res, &ErrorResponse { message: "Bad request" });
+        self.send_json(res, &ErrorResponse { message: &format!("Bad request: {}", reason) });
     }
 
     fn not_allowed(&self, mut res: Response) {
