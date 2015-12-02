@@ -23,22 +23,23 @@ use oauth2::Config;
 use rustc_serialize::Encodable;
 use rustc_serialize::json::{self, Json};
 use queryst::parse;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::error::Error;
 use std::io::Read;
 use std::string::String;
 use std::sync::{Arc, Mutex};
 use unicase::UniCase;
-use url::parse_path;
+use url::{parse_path, Url};
 use self::uuid::Uuid;
 
 fn main() {
-    let (listen_address, ssl, oauth_config, oauth_redirect_path) = parse_flags();
+    let (listen_address, ssl, oauth_config, oauth_redirect_path, whitelisted_domains) = parse_flags();
 
     let handler = Handler{
         oauth_config: oauth_config,
         oauth_redirect_path: oauth_redirect_path,
+        whitelisted_domains: whitelisted_domains,
         redirect_uris: Arc::new(Mutex::new(HashMap::new())),
     };
 
@@ -50,7 +51,7 @@ fn main() {
     }
 }
 
-fn parse_flags() -> (String, Option<Openssl>, oauth2::Config, String) {
+fn parse_flags() -> (String, Option<Openssl>, oauth2::Config, String, HashSet<String>) {
     let mut opts = Options::new();
 
     opts.optopt("p", "port", "Port on which to listen", "3000");
@@ -64,6 +65,8 @@ fn parse_flags() -> (String, Option<Openssl>, oauth2::Config, String) {
     opts.optopt("", "oauth_client_id", "Github oauth client ID", "clientid");
     opts.optopt("", "oauth_client_secret", "Github oauth client secret", "clientsecret");
     opts.optopt("", "oauth_redirect_path", "Github oauth redirect URL", "/oauth/redirect");
+
+    opts.optopt("d", "whitelisted_domains", "Hostname and port of domains to which to allow redirection (comma-separated)", "");
 
     let args: Vec<String> = env::args().collect();
     let matches = opts.parse(&args[1..]).unwrap();
@@ -84,13 +87,19 @@ fn parse_flags() -> (String, Option<Openssl>, oauth2::Config, String) {
     let oauth_redirect_path = matches.opt_str("oauth_redirect_path").unwrap();
     oauth_config.redirect_url = format!("https://{}{}", matches.opt_str("host_and_port").unwrap(), oauth_redirect_path);
 
+    let whitelisted_domains = matches.opt_str("d").unwrap()
+        .split(",")
+        .map(|x| x.to_string())
+        .collect();
+
     let host_and_port = format!("{}:{}", interface, port);
-    return (host_and_port, ssl, oauth_config, oauth_redirect_path);
+    return (host_and_port, ssl, oauth_config, oauth_redirect_path, whitelisted_domains);
 }
 
 struct Handler {
     oauth_config: oauth2::Config,
     oauth_redirect_path: String,
+    whitelisted_domains: HashSet<String>,
     redirect_uris: Arc<Mutex<HashMap<String, String>>>,
 }
 
@@ -191,9 +200,9 @@ impl Handler {
 
         let redirect_uri = self.get_redirect_uri(&qs);
 
-        if redirect_uri.is_some() {
-            let mut uris = self.redirect_uris.lock().unwrap();
-            uris.insert(uuid.clone(), redirect_uri.unwrap().to_owned());
+        if redirect_uri.is_none() {
+            self.bad_request(res);
+            return;
         }
 
         // TODO: Implement clone for oauth2::Config
@@ -259,7 +268,29 @@ impl Handler {
     }
 
     fn get_redirect_uri(&self, qs: &Option<String>) -> Option<String> {
-        return self.get_string_qs(qs, "redirect_uri");
+        let string = self.get_string_qs(qs, "redirect_uri");
+        if string.is_none() {
+            return string
+        }
+
+        let url = Url::parse(&string.clone().unwrap());
+        match url {
+            Ok(u) => {
+                let domain = u.domain();
+                if domain.is_none() {
+                    return None;
+                }
+                if !self.is_whitelisted_domain(domain.unwrap()) {
+                    return None;
+                }
+            },
+            Err(_) => {return None; },
+        };
+        return string;
+    }
+
+    fn is_whitelisted_domain(&self, domain: &str) -> bool {
+        return self.whitelisted_domains.contains(&domain.to_owned());
     }
 
     fn get_scopes(&self, qs: &Option<String>) -> Vec<String> {
