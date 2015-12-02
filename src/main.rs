@@ -283,6 +283,9 @@ impl Handler {
         let url = Url::parse(&string.clone().unwrap());
         match url {
             Ok(u) => {
+                if &u.scheme != "https" {
+                    return None;
+                }
                 let domain = u.domain();
                 if domain.is_none() {
                     return None;
