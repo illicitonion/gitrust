@@ -8,13 +8,13 @@ It is my first Rust, so is almost certainly terrible.
 
 ## Building
 
-You need the rust and cargo tools. Then simply run:
+You need the `rust` and `cargo` tools. Then simply run:
 
 ```
 cargo build --release
 ```
 
-and gitrust will be output to target/release/gitrust.
+and `gitrust` will be output to `target/release/gitrust`.
 
 ## Flags
 
