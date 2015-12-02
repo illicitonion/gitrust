@@ -205,6 +205,9 @@ impl Handler {
             return;
         }
 
+        let mut uris = self.redirect_uris.lock().unwrap();
+        uris.insert(uuid.clone(), redirect_uri.unwrap().to_owned());
+
         // TODO: Implement clone for oauth2::Config
         let mut oauth_config = oauth2::Config::new(
             &self.oauth_config.client_id,
@@ -253,7 +256,7 @@ impl Handler {
                 // TODO: Form URI better
                 res.headers_mut().set(header::Location(format!("{}?token={}", uri, token)));
             },
-            None => { self.send_json(res, &TokenResponse { access_token: &token }); }
+            None => { self.bad_request(res); },
         };
     }
 
@@ -343,9 +346,4 @@ struct ShaResponse<'a> {
 #[derive(RustcEncodable)]
 struct ErrorResponse<'a> {
     message: &'a str,
-}
-
-#[derive(RustcEncodable)]
-struct TokenResponse<'a> {
-    access_token: &'a str,
 }
