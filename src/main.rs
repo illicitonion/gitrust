@@ -326,6 +326,7 @@ impl Handler {
 
     fn bad_request(&self, mut res: Response) {
         let _ = *res.status_mut() = StatusCode::BadRequest;
+        self.send_json(res, &ErrorResponse { message: "Bad request" });
     }
 
     fn not_allowed(&self, mut res: Response) {
