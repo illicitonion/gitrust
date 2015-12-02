@@ -205,7 +205,7 @@ impl Handler {
         let redirect_uri = self.get_redirect_uri(&qs);
 
         if redirect_uri.is_none() {
-            self.bad_request(res, "Missing redirect_uri");
+            self.bad_request(res, "Missing or bad redirect_uri");
             return;
         }
 
