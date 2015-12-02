@@ -111,6 +111,10 @@ fn push(path: &Path, remote: &str, branch: &str, username: &str, password: &str,
         false => "",
     };
 
+    if remote.contains('"') || branch.contains('"') || username.contains('"') || password.contains('"') {
+        return Err(format!("Illegal characters in parameters - \" is not allowed"));
+    }
+
     let output = try_or_string!(
         Command::new("expect")
         .arg("-c").arg(format!("eval spawn git push{} {} {}", do_force, remote, branch))
