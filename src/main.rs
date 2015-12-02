@@ -178,7 +178,7 @@ impl Handler {
             get_json_string!(body, "commit_message"),
             get_json_string!(body, "username"),
             get_json_string!(body, "password"),
-            get_json_string!(body, "comitter_name"),
+            get_json_string!(body, "committer_name"),
             get_json_string!(body, "committer_email"),
         );
     }
@@ -194,7 +194,7 @@ impl Handler {
             get_json_string!(body, "commit_message"),
             get_json_string!(body, "username"),
             get_json_string!(body, "password"),
-            get_json_string!(body, "comitter_name"),
+            get_json_string!(body, "committer_name"),
             get_json_string!(body, "committer_email"),
         );
     }
